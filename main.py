@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 import time
+
 import tf
 import math
 
@@ -8,6 +9,8 @@ import rospy
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+
+from enum import Enum
 
 from tf.transformations import euler_from_quaternion
 
@@ -19,8 +22,19 @@ y_target = 1.0
 value_right = 0
 value_front = 0
 value_left = 0
+range_threshold = 0.4
 is_stop_moving = False
 vel_msg = Twist()
+
+
+class RobotState(Enum):
+    DRIVING = 0
+    STOPPED = 1
+    ROTATING = 2
+    FOLLOW_WALL = 3
+
+
+actualState = RobotState.STOPPED
 
 
 def scan_callback(msg):  # reacting to new msg from simulation
@@ -148,6 +162,37 @@ def Reset():
     rotate(0)
 
 
+def IsObstacleInFront():
+    if value_front < 0.4:
+        return True
+    return False
+
+
+def StateHandler_STOPPED():
+    global actualState
+    if not IsObstacleInFront() and not IsInDirection():
+        actualState = RobotState.ROTATING
+        rotate_to_target()
+    elif not IsObstacleInFront() and IsInDirection():
+        actualState = RobotState.DRIVING
+        move_forward()
+    elif IsObstacleInFront():
+        actualState = RobotState.FOLLOW_WALL
+        follow_wall()
+
+
+def StateHandler_DRIVING():
+    global actualState
+
+
+def StateHandler_ROTATING():
+    global actualState
+
+
+def StateHandler_FOLLOW_WALL():
+    global actualState
+
+
 if __name__ == '__main__':
     # Set ROS nodes.
     rospy.init_node('scan_node', anonymous=True)
@@ -162,16 +207,27 @@ if __name__ == '__main__':
         # print(">>>>> Data: value_right: " + str(value_right) + ", value_left: " + str(value_left) + ", value_front: "
         #       + str(value_front) + ", yaw: " + str(yaw))
 
-        # check dist from wall
-        if value_front > 0.4:
+        # state handler
+        if actualState == RobotState.STOPPED:
+            StateHandler_STOPPED()
+        elif actualState == RobotState.DRIVING:
+            StateHandler_DRIVING()
+        elif actualState == RobotState.ROTATING:
+            StateHandler_ROTATING()
+        elif actualState == RobotState.FOLLOW_WALL:
+            StateHandler_FOLLOW_WALL()
+        else:
+            pass
+
+        if not IsObstacleInFront():
             # If robot is not following wall...
-            if not ((value_right < 0.4 and yaw < 0) or (value_left < 0.4 and yaw > 0)):
+            if not ((value_right < range_threshold and yaw < 0) or (value_left < range_threshold and yaw > 0)):
                 rotate_to_target()
                 SetMovingState(True)
-            while value_front > 0.4:
+            while not IsObstacleInFront():
                 move_forward()
                 # If robot is not following wall...
-                if not ((value_right < 0.4 and yaw < 0) or (value_left < 0.4 and yaw > 0)):
+                if not ((value_right < range_threshold and yaw < 0) or (value_left < range_threshold and yaw > 0)):
                     # If robot is not in the direction of the goal...
                     if (not IsInDirection()) and GetMovingState():
                         print(">>>>> Stop moving forward")
@@ -185,8 +241,7 @@ if __name__ == '__main__':
         Reset()
 
         # Check is goal reached.
-        is_reached = is_target_reached()
-        if is_reached:
+        if is_target_reached():
             print(">>>>> Goal is reached")
             break
 
