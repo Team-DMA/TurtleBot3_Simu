@@ -41,45 +41,37 @@ def pose_callback(pose_data):
     x_robot = pose_data.pose.pose.position.x
     y_robot = pose_data.pose.pose.position.y
 
-    quaternion = (
-        pose_data.pose.pose.orientation.x,
-        pose_data.pose.pose.orientation.y,
-        pose_data.pose.pose.orientation.z,
-        pose_data.pose.pose.orientation.w)
-
-    # debug
-    # noinspection PyUnresolvedReferences
-    rpy = tf.transformations.euler_from_quaternion(quaternion)
-    yaw = rpy[2]
-    print("Debug:    " + str(yaw))
-
     orientation_q = pose_data.pose.pose.orientation
     orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
-    (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
-    print("Debug 2:    " + str(yaw))
+    (roll, pitch, yaw) = euler_from_quaternion(orientation_list)  # get yaw
 
 
 def rotate_to_target():
     print(">>>>> Rotating to target direction")
     global x_target, y_target, yaw, vel_msg
-    desired_angle_goal = math.atan2(y_target - y_robot, x_target - x_robot)
+    desired_angle_target = math.atan2(y_target - y_robot, x_target - x_robot)
     K_angular = 0.5
-    angular_speed = (desired_angle_goal - yaw) * K_angular
-    while True:
-        vel_msg.angular.z = angular_speed
-        velocity_publisher.publish(vel_msg)
-        if desired_angle_goal < 0:
-            if (desired_angle_goal - yaw) > -0.1:
-                break
-        else:
-            if (desired_angle_goal - yaw) < 0.1:
-                break
-    vel_msg.angular.z = 0
-    velocity_publisher.publish(vel_msg)
+    speedFactor = 100
+    # angular_speed = (desired_angle_target - yaw) * K_angular
+    target_rad = desired_angle_target * math.pi / 180 * speedFactor
+    angular_speed = K_angular * (target_rad - yaw)
+    # print("Yaw: " + str(yaw) + ", target: " + str(desired_angle_target))
+    while not (IsInDirection()):
+        rotate(angular_speed)
+    print(">>>>> Target angle reached")
+    # print("Target Angle reached: Yaw: " + str(yaw) + ", target: " + str(desired_angle_target))
+    rotate(0)
+
+
+def IsInDirection():
+    desired_angle_goal = math.atan2(y_target - y_robot, x_target - x_robot)
+    if (abs(desired_angle_goal - yaw)) < 0.1:
+        return True
+    return False
 
 
 def move_forward():
-    print(">>>>> Move forward")
+    # print(">>>>> Move forward")
     vel_msg = Twist()
     vel_msg.linear.x = 0.3
     velocity_publisher.publish(vel_msg)
@@ -119,13 +111,6 @@ def is_target_reached():  # Check if target is reached.
     return False
 
 
-def is_towards_target():  # Check if robot in direction of target
-    desired_angle_goal = math.atan2(y_target - y_robot, x_target - x_robot)
-    if abs(desired_angle_goal - yaw) < 0.4:
-        return True
-    return False
-
-
 def get_wall_angle(is_right):  # Get the wall angle
     angle = 0
     if ((value_left > 0.6 and yaw > 0) or (value_right > 0.6 and yaw < 0)) and not (
@@ -140,8 +125,13 @@ def move(x, y):
     vel_msg.angular.z = x
     vel_msg.linear.x = y
     velocity_publisher.publish(vel_msg)
-    if x and y is 0.0:
+    if x == 0.0 and y == 0.0:
         SetMovingState(False)
+
+
+def rotate(z):
+    vel_msg.angular.z = z
+    velocity_publisher.publish(vel_msg)
 
 
 def SetMovingState(boolean):
@@ -153,6 +143,11 @@ def GetMovingState():
     return is_stop_moving
 
 
+def Reset():
+    move(0, 0)
+    rotate(0)
+
+
 if __name__ == '__main__':
     # Set ROS nodes.
     rospy.init_node('scan_node', anonymous=True)
@@ -162,10 +157,10 @@ if __name__ == '__main__':
     velocity_publisher = rospy.Publisher(cmd_vel_topic, Twist, queue_size=10)
     time.sleep(2.0)
 
-    while True:
+    while not rospy.is_shutdown():
         # Print data.
-        print(">>>>> Data: value_right: " + str(value_right) + ", value_left: " + str(value_left) + ", value_front: "
-              + str(value_front) + ", yaw: " + str(yaw))
+        # print(">>>>> Data: value_right: " + str(value_right) + ", value_left: " + str(value_left) + ", value_front: "
+        #       + str(value_front) + ", yaw: " + str(yaw))
 
         # check dist from wall
         if value_front > 0.4:
@@ -178,7 +173,7 @@ if __name__ == '__main__':
                 # If robot is not following wall...
                 if not ((value_right < 0.4 and yaw < 0) or (value_left < 0.4 and yaw > 0)):
                     # If robot is not in the direction of the goal...
-                    if (not is_towards_target()) and GetMovingState():
+                    if (not IsInDirection()) and GetMovingState():
                         print(">>>>> Stop moving forward")
                         move(0.0, 0.0)
                         break
@@ -187,12 +182,12 @@ if __name__ == '__main__':
             follow_wall()
 
         # Do some cleaning.
-        vel_msg.angular.z = 0.0
-        vel_msg.linear.x = 0.0
-        velocity_publisher.publish(vel_msg)
+        Reset()
 
         # Check is goal reached.
         is_reached = is_target_reached()
         if is_reached:
             print(">>>>> Goal is reached")
             break
+
+    Reset()
