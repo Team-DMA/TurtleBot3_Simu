@@ -101,12 +101,11 @@ def follow_wall():
         print(">>>>> Change angle to left (90 degrees): ", angle)
     if (angle - yaw) < 0:
         while (angle - yaw) < -0.1:
-            vel_msg.angular.z = (angle - yaw) * 0.9
-            velocity_publisher.publish(vel_msg)
+            rotate((angle - yaw) * 0.9)
     else:
         while (angle - yaw) > 0.1:
-            vel_msg.angular.z = (angle - yaw) * 0.9
-            velocity_publisher.publish(vel_msg)
+            rotate((angle - yaw) * 0.9)
+
     vel_msg.angular.z = 0
     # Move robot forward (for amount of time) after each rotation to prevent it from getting stuck.
     if value_front > 0.4:
@@ -139,22 +138,11 @@ def move(x, y):
     vel_msg.angular.z = x
     vel_msg.linear.x = y
     velocity_publisher.publish(vel_msg)
-    if x == 0.0 and y == 0.0:
-        SetMovingState(False)
 
 
 def rotate(z):
     vel_msg.angular.z = z
     velocity_publisher.publish(vel_msg)
-
-
-def SetMovingState(boolean):
-    global is_stop_moving
-    is_stop_moving = boolean
-
-
-def GetMovingState():
-    return is_stop_moving
 
 
 def Reset():
@@ -169,28 +157,55 @@ def IsObstacleInFront():
 
 
 def StateHandler_STOPPED():
-    global actualState
     if not IsObstacleInFront() and not IsInDirection():
-        actualState = RobotState.ROTATING
-        rotate_to_target()
+        SetState(RobotState.ROTATING)
+
     elif not IsObstacleInFront() and IsInDirection():
-        actualState = RobotState.DRIVING
-        move_forward()
+        SetState(RobotState.DRIVING)
+
     elif IsObstacleInFront():
-        actualState = RobotState.FOLLOW_WALL
-        follow_wall()
+        SetState(RobotState.FOLLOW_WALL)
+
+    elif is_target_reached():
+        SetState(RobotState.STOPPED)
 
 
 def StateHandler_DRIVING():
     global actualState
+    while not IsObstacleInFront():
+        move_forward()
+        if not IsInDirection():
+            SetState(RobotState.ROTATING)
+            break
+        if IsObstacleInFront():
+            SetState(RobotState.FOLLOW_WALL)
+            break
+    if is_target_reached():
+        SetState(RobotState.STOPPED)
 
 
 def StateHandler_ROTATING():
     global actualState
+    while not IsInDirection():
+        rotate_to_target()
+        if IsInDirection():
+            SetState(RobotState.DRIVING)
+            break
 
 
 def StateHandler_FOLLOW_WALL():
     global actualState
+    while IsObstacleInFront():
+        follow_wall()
+        if not IsObstacleInFront():
+            SetState(RobotState.ROTATING)
+            break
+
+
+def SetState(state: RobotState):
+    global actualState
+    actualState = state
+    print(">>>>> Changed state to: " + str(state))
 
 
 if __name__ == '__main__':
@@ -219,23 +234,23 @@ if __name__ == '__main__':
         else:
             pass
 
-        if not IsObstacleInFront():
-            # If robot is not following wall...
-            if not ((value_right < range_threshold and yaw < 0) or (value_left < range_threshold and yaw > 0)):
-                rotate_to_target()
-                SetMovingState(True)
-            while not IsObstacleInFront():
-                move_forward()
-                # If robot is not following wall...
-                if not ((value_right < range_threshold and yaw < 0) or (value_left < range_threshold and yaw > 0)):
-                    # If robot is not in the direction of the goal...
-                    if (not IsInDirection()) and GetMovingState():
-                        print(">>>>> Stop moving forward")
-                        move(0.0, 0.0)
-                        break
-
-        else:
-            follow_wall()
+        # if not IsObstacleInFront():
+        #     # If robot is not following wall...
+        #     if not ((value_right < range_threshold and yaw < 0) or (value_left < range_threshold and yaw > 0)):
+        #         rotate_to_target()
+        #         SetMovingState(True)
+        #     while not IsObstacleInFront():
+        #         move_forward()
+        #         # If robot is not following wall...
+        #         if not ((value_right < range_threshold and yaw < 0) or (value_left < range_threshold and yaw > 0)):
+        #             # If robot is not in the direction of the goal...
+        #             if (not IsInDirection()) and GetMovingState():
+        #                 print(">>>>> Stop moving forward")
+        #                 move(0.0, 0.0)
+        #                 break
+        #
+        # else:
+        #     follow_wall()
 
         # Do some cleaning.
         Reset()
