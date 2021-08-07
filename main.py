@@ -22,6 +22,8 @@ y_target = 1.0
 value_right = 0
 value_front = 0
 value_left = 0
+value_halfleft = 0
+value_halfright = 0
 range_threshold = 0.4
 is_stop_moving = False
 vel_msg = Twist()
@@ -38,15 +40,21 @@ actualState = RobotState.STOPPED
 
 
 def scan_callback(msg):  # reacting to new msg from simulation
-    global value_right, value_front, value_left
+    global value_right, value_front, value_left, value_halfleft, value_halfright
     ranges = msg.ranges
-    front_range = ranges[339:359] + ranges[0:20]
-    right_range = ranges[75:95]
-    left_range = ranges[255:275]
+    front_range = ranges[349:359] + ranges[0:10]
+    right_range = ranges[80:100]  # 90° --> right
+    left_range = ranges[260:280]  # 270° --> left
+
+    halfleft_range = ranges[310:320]  # 315°
+    halfright_range = ranges[85:95]  # 90°
 
     value_left = min(left_range)
     value_right = min(right_range)
     value_front = min(front_range)
+
+    value_halfright = min(halfright_range)
+    value_halfleft = min(halfleft_range)
 
 
 def pose_callback(pose_data):
@@ -93,12 +101,8 @@ def move_forward():
 
 
 def follow_wall():
-    if value_right > value_left:
-        angle = get_wall_angle(True)
-        print(">>>>> Change angle to right (90 degrees): ", angle)
-    else:
-        angle = get_wall_angle(False)
-        print(">>>>> Change angle to left (90 degrees): ", angle)
+    angle = get_wall_angle()
+
     if (angle - yaw) < 0:
         while (angle - yaw) < -0.1:
             rotate((angle - yaw) * 0.9)
@@ -124,13 +128,32 @@ def is_target_reached():  # Check if target is reached.
     return False
 
 
-def get_wall_angle(is_right):  # Get the wall angle
+def get_wall_angle():  # Get the wall angle
+    # angle = 0
+    # if ((value_left > 0.6 and yaw > 0) or (value_right > 0.6 and yaw < 0)) and not (
+    #         (0.0 < yaw < 0.002) or (-3.16 < yaw < -3.0)):
+    #     angle = 0.0 if is_right else -math.pi
+    # else:
+    #     angle = -math.pi / 2 if is_right else math.pi / 2
+    # return angle
+
+    a = 0
+    b = 0
+    c = 0
     angle = 0
-    if ((value_left > 0.6 and yaw > 0) or (value_right > 0.6 and yaw < 0)) and not (
-            (0.0 < yaw < 0.002) or (-3.16 < yaw < -3.0)):
-        angle = 0.0 if is_right else -math.pi
-    else:
-        angle = -math.pi / 2 if is_right else math.pi / 2
+    gamma = 45  # 45°
+
+    if (value_halfleft < value_front):
+        a = value_halfleft
+        b = value_front
+    elif (value_halfright < value_front):
+        a = value_halfright
+        b = value_front
+
+    c = math.sqrt(a ** 2 + b ** 2 - 2 * a * b + math.cos(gamma))
+    alpha = math.acos((-0.5 * a ** 2 + 0.5 * b ** 2 + 0.5 * c ** 2) / (b * c))
+    angle = 180 - alpha - gamma
+
     return angle
 
 
