@@ -26,7 +26,7 @@ value_front = 0
 value_left = 0
 value_halfleft = 0
 value_halfright = 0
-range_threshold = 0.4
+range_threshold = 0.45
 speed_forward = 0.3
 speed_rotating = 20  # degrees/sec
 cornerDetected = False
@@ -88,14 +88,13 @@ def rotate_to_target():
     global x_target, y_target, yaw, vel_msg
     desired_angle_target = math.atan2(y_target - y_robot, x_target - x_robot)
     angular_speed = (desired_angle_target - yaw)
-    print("angular_speed: " + str(angular_speed) + ", radians_speed: " + str(math.radians(speed_rotating)))
     while not (IsInDirection()):
-        if (angular_speed < 0):
+        if angular_speed < 0:
             rotate(-abs(math.radians(speed_rotating)))
         else:
             rotate(abs(math.radians(speed_rotating)))
-    print(">>>>> Target angle reached")
     rotate(0)
+    print(">>>>> Target angle reached")
 
 
 def IsInDirection():
@@ -107,10 +106,7 @@ def IsInDirection():
 
 def follow_wall():
     angle = get_wall_angle()
-    print("get angle: " + str(angle))
-    print("rotating...")
     current_yaw = yaw
-
     angular_speed = math.radians(speed_rotating)
 
     if rotationDirection is RotationDirection.RIGHT:
@@ -129,29 +125,27 @@ def follow_wall():
     #     t1 = rospy.Time.now().to_sec()
     #     current_angle = angular_speed * (t1 - t0)
 
-    print("Angle reached...")
     rotate(0)
-    print("go on...")
 
-    # Move robot forward after each rotation to prevent it from getting stuck.
-    if rotationDirection is RotationDirection.LEFT:  # right
+    # Move robot forward after each rotation to prevent it from getting stuck
+    if rotationDirection is RotationDirection.LEFT:  # wait until right is clear
         move_forward()
-        print("gucke rechts")
         rospy.sleep(0.5)
         while value_right < 0.4:
-            pass
+            if IsObstacleInFront():
+                SetState(RobotState.FOLLOW_WALL)
         move(0, 0)
 
-    else:  # left
+    else:  # wait until left is clear
         move_forward()
-        print("gucke links")
         rospy.sleep(0.5)
         while value_left < 0.4:
-            pass
+            if IsObstacleInFront():
+                SetState(RobotState.FOLLOW_WALL)
         move(0, 0)
 
 
-def is_target_reached():  # Check if target is reached.
+def is_target_reached():  # Check if target is reached
     if (x_target - 0.5 < x_robot < x_target + 0.5) and (y_target - 0.5 < y_robot < y_target + 0.5):
         return True
     return False
@@ -163,12 +157,8 @@ def get_wall_angle():  # Get the wall angle
     angle = 0
     gamma = 20  # 20°
 
-    print("value_front: " + str(value_front))
-    print("value_halfleft: " + str(value_halfleft))
-    print("value_halfright: " + str(value_halfright))
-
-    if (value_halfleft is float("inf") and value_halfright is float("inf")):
-        # random rotate
+    if value_halfleft is float("inf") and value_halfright is float("inf"):
+        # random rotate because of unknown values
         rotationDirection = random.randint(1, 2)
         angle = 80
         print("value_halfleft and value_halfright is inf")
@@ -176,24 +166,21 @@ def get_wall_angle():  # Get the wall angle
         a = 0
         b = 0
 
-        if (value_halfright < value_halfleft):
+        if value_halfright < value_halfleft:
             a = value_halfleft
             b = value_front
             rotationDirection = RotationDirection.LEFT
-            print(str(rotationDirection))
-        elif (value_halfright > value_halfleft):
+        elif value_halfright > value_halfleft:
             a = value_halfright
             b = value_front
             rotationDirection = RotationDirection.RIGHT
-            print(str(rotationDirection))
 
-        if (a != 0 and b != 0):
+        if a != 0 and b != 0:
             c = math.sqrt(a ** 2 + b ** 2 - 2 * a * b * math.cos(math.radians(gamma)))
             tmp222 = ((-0.5 * (a ** 2) + 0.5 * (b ** 2) + 0.5 * (c ** 2)) / (b * c))
             alpha = math.degrees(math.acos(tmp222))
             angle = 180 - alpha - gamma
 
-    print("Angle: " + str(angle) + ", rad: " + str(math.radians(angle)))
     return math.radians(angle)
 
 
@@ -242,34 +229,36 @@ def StateHandler_DRIVING():
         if not IsInDirection():
             SetState(RobotState.ROTATING)
             break
-        if IsObstacleInFront():
-            SetState(RobotState.FOLLOW_WALL)
-            break
+        # if IsObstacleInFront():
+        #     SetState(RobotState.FOLLOW_WALL)
+        #     break
         if is_target_reached():
             SetState(RobotState.STOPPED)
             break
 
-    SetState(RobotState.STOPPED)
+    SetState(RobotState.FOLLOW_WALL)
 
 
 def StateHandler_ROTATING():
     global actualState
     while not IsInDirection():
         rotate_to_target()
-        if IsInDirection():
-            SetState(RobotState.DRIVING)
-            break
-    SetState(RobotState.STOPPED)
+        # if IsInDirection():
+        #     SetState(RobotState.DRIVING)
+        #     break
+
+    SetState(RobotState.DRIVING)
 
 
 def StateHandler_FOLLOW_WALL():
     global actualState
     while IsObstacleInFront():
         follow_wall()
-        if not IsObstacleInFront():
-            SetState(RobotState.ROTATING)
-            break
-    SetState(RobotState.STOPPED)
+        # if not IsObstacleInFront():
+        #     SetState(RobotState.ROTATING)
+        #     break
+
+    SetState(RobotState.ROTATING)
 
 
 def SetState(state: RobotState):
@@ -289,10 +278,11 @@ if __name__ == '__main__':
 
     while not rospy.is_shutdown():
 
-        while (value_front) < 0.15:
+        while value_front < 0.15:
             print(">>>>> Collision detected!")
-            move(-0.2, 0)
-            Reset()
+            move(-0.2, 0)  # move a little bit backwards
+            if value_front >= 0.15:
+                Reset()
 
         # Check if goal is reached
         if is_target_reached():
